@@ -1,9 +1,9 @@
 {
-  "name": "nodejs-typescript-template",
-  "version": "1.346.0",
-  "description": "A template for a nodejs application, using typescript",
+  "name": "startgg-gender",
+  "version": "0.0.0",
+  "description": "startgg melee singles gender",
   "main": "dist/src/index.js",
-  "author": "",
+  "author": "Nicolet",
   "license": "MIT",
   "scripts": {
     "dev": "nodemon --watch src/**/*.ts --exec ts-node ./src/app.ts",
@@ -16,7 +16,7 @@
     "test:coverage": "jest --coverage"
   },
   "dependencies": {
-    "dotenv": "^16.4.5"
+    "bottleneck": "^2.19.5"
   },
   "devDependencies": {
     "@types/jest": "^29.5.12",
