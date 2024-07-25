@@ -128,7 +128,7 @@ type ApiSets = {
       entrant: {
         id: number;
         initialSeedNum: number;
-      }
+      } | null,
     }[],
     winnerId: number;
   }[],
@@ -189,7 +189,7 @@ async function getEvent(id: number, tournamentName: string, eventName: string, s
       console.log(`event id: ${id}, sets page ${setsPage}, entrantIds: [${entrantIds}]`);
       nextSets = (await fetchGql(EVENT_SETS_QUERY, { id, page: setsPage, entrantIds })).event.sets;
       for (const set of nextSets.nodes) {
-        if (set.displayScore === 'DQ') {
+        if (set.displayScore === 'DQ' || !set.slots[0].entrant || !set.slots[1].entrant) {
           continue;
         }
         const slot0SeedTier = getSeedTier(set.slots[0].entrant.initialSeedNum);
@@ -200,12 +200,12 @@ async function getEvent(id: number, tournamentName: string, eventName: string, s
 
         const slot0Less = set.slots[0].entrant.initialSeedNum < set.slots[1].entrant.initialSeedNum;
         const lowerSeedI = slot0Less ? 1 : 0;
-        const lowerSeedId = set.slots[lowerSeedI].entrant.id;
+        const lowerSeedId = set.slots[lowerSeedI].entrant!.id;
         if (lowerSeedId === set.winnerId && sheOrHerIds.has(lowerSeedId)) {
-          const lowerSeed = set.slots[lowerSeedI].entrant.initialSeedNum;
-          const higherSeed = set.slots[slot0Less ? 0 : 1].entrant.initialSeedNum;
+          const lowerSeed = set.slots[lowerSeedI].entrant!.initialSeedNum;
+          const higherSeed = set.slots[slot0Less ? 0 : 1].entrant!.initialSeedNum;
           const entrant = idToEntrant.get(lowerSeedId)!
-          const opponent = idToEntrant.get(set.slots[slot0Less ? 0 : 1].entrant.id) || { id: 0, name: '', pronouns: '' };
+          const opponent = idToEntrant.get(set.slots[slot0Less ? 0 : 1].entrant!.id) || { id: 0, name: '', pronouns: '' };
           console.log(`${entrant.name} (${entrant.pronouns}), ${lowerSeed} seed upset ${opponent.name} (${opponent.pronouns}), ${higherSeed} seed (factor: ${getSeedTier(lowerSeed) - getSeedTier(higherSeed)}) at ${tournamentName} - ${eventName}`);
           await fh.write(`"${entrant.name}","${entrant.pronouns}",${lowerSeed},"${opponent.name}","${opponent.pronouns}",${higherSeed},${getSeedTier(lowerSeed) - getSeedTier(higherSeed)},"${tournamentName}","${eventName}",${startAt * 1000}\n`);
         }
