@@ -82,14 +82,14 @@ type ApiEntrants = {
   },
   nodes: {
     id: number,
-    participants: [{
+    participants: {
       player: {
         gamerTag: string;
         user: {
           genderPronoun: string | null;
         } | null,
       },
-    }],
+    }[],
   }[],
 };
 type Entrant = {
@@ -153,6 +153,9 @@ async function getEvent(id: number, tournamentName: string, eventName: string, s
     console.log(`event id: ${id}, entrants page ${entrantsPage}`)
     nextEntrants = (await fetchGql(EVENT_ENTRANTS_QUERY, { id, page: entrantsPage })).event.entrants;
     for (const entrant of nextEntrants.nodes) {
+      if (!entrant.participants?.[0]) {
+        continue;
+      }
       const genderPronoun = entrant.participants[0].player.user?.genderPronoun;
       idToEntrant.set(
         entrant.id,
@@ -202,7 +205,7 @@ async function getEvent(id: number, tournamentName: string, eventName: string, s
           const lowerSeed = set.slots[lowerSeedI].entrant.initialSeedNum;
           const higherSeed = set.slots[slot0Less ? 0 : 1].entrant.initialSeedNum;
           const entrant = idToEntrant.get(lowerSeedId)!
-          const opponent = idToEntrant.get(set.slots[slot0Less ? 0 : 1].entrant.id)!;
+          const opponent = idToEntrant.get(set.slots[slot0Less ? 0 : 1].entrant.id) || { id: 0, name: '', pronouns: '' };
           console.log(`${entrant.name} (${entrant.pronouns}), ${lowerSeed} seed upset ${opponent.name} (${opponent.pronouns}), ${higherSeed} seed (factor: ${getSeedTier(lowerSeed) - getSeedTier(higherSeed)}) at ${tournamentName} - ${eventName}`);
           await fh.write(`"${entrant.name}","${entrant.pronouns}",${lowerSeed},"${opponent.name}","${opponent.pronouns}",${higherSeed},${getSeedTier(lowerSeed) - getSeedTier(higherSeed)},"${tournamentName}","${eventName}",${startAt * 1000}\n`);
         }
