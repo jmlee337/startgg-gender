@@ -167,14 +167,8 @@ async function getEvent(id: number, tournamentName: string, eventName: string, s
       );
       if (genderPronoun) {
         const lowerCase = genderPronoun.toLowerCase();
-        const anyAll = lowerCase.includes('any') || lowerCase.includes('all');
         const heHim = lowerCase.includes('he') || lowerCase.includes('him');
-        const theyThem = lowerCase.includes('they') || lowerCase.includes('them');
-        if (
-          lowerCase.includes('she') ||
-          lowerCase.includes('her') ||
-          (!heHim && (anyAll || theyThem))
-        ) {
+        if (lowerCase.includes('she') || lowerCase.includes('her') || !heHim) {
           sheOrHerIds.add(entrant.id);
         }
       }
