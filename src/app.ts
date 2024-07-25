@@ -204,7 +204,7 @@ async function getEvent(id: number, tournamentName: string, eventName: string, s
           const entrant = idToEntrant.get(lowerSeedId)!
           const opponent = idToEntrant.get(set.slots[slot0Less ? 0 : 1].entrant.id)!;
           console.log(`${entrant.name} (${entrant.pronouns}), ${lowerSeed} seed upset ${opponent.name} (${opponent.pronouns}), ${higherSeed} seed (factor: ${getSeedTier(lowerSeed) - getSeedTier(higherSeed)}) at ${tournamentName} - ${eventName}`);
-          await fh.write(`${entrant.name},${entrant.pronouns},${lowerSeed},${opponent.name},${opponent.pronouns},${higherSeed},${getSeedTier(lowerSeed) - getSeedTier(higherSeed)},${tournamentName},${eventName},${startAt * 1000}\n`);
+          await fh.write(`"${entrant.name}","${entrant.pronouns}",${lowerSeed},"${opponent.name}","${opponent.pronouns}",${higherSeed},${getSeedTier(lowerSeed) - getSeedTier(higherSeed)},"${tournamentName}","${eventName}",${startAt * 1000}\n`);
         }
       }
       setsPage++;
