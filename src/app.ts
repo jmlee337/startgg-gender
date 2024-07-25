@@ -1,7 +1,11 @@
 import Bottleneck from 'bottleneck';
+import * as dotenv from 'dotenv';
+import { FileHandle, mkdir, open } from 'fs/promises';
+dotenv.config();
+const key = process.env.STARTGG_API_KEY;
 
 const limiter = new Bottleneck({
-  minTime: 60000 / 70,
+  minTime: 60000 / 75,
 });
 
 async function wrappedFetch(
@@ -31,7 +35,7 @@ async function fetchGql(query: string, variables: any, timeoutMs?: number) {
       wrappedFetch('https://api.start.gg/gql/alpha', {
         method: 'POST',
         headers: {
-          Authorization: `Bearer 92a9b476b819e15d7abbcc56101550a2`,
+          Authorization: `Bearer ${key}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ query, variables }),
@@ -140,7 +144,7 @@ function getSeedTier(seed: number) {
   }
   throw 'asdf';
 }
-async function getEvent(id: number, tournamentName: string, eventName: string) {
+async function getEvent(id: number, tournamentName: string, eventName: string, startAt: number, fh: FileHandle) {
   const idToEntrant = new Map<number, Entrant>();
   const sheOrHerIds = new Set<number>();
   let entrantsPage = 1;
@@ -160,7 +164,14 @@ async function getEvent(id: number, tournamentName: string, eventName: string) {
       );
       if (genderPronoun) {
         const lowerCase = genderPronoun.toLowerCase();
-        if (lowerCase.includes('she') || lowerCase.includes('her')) {
+        const anyAll = lowerCase.includes('any') || lowerCase.includes('all');
+        const heHim = lowerCase.includes('he') || lowerCase.includes('him');
+        const theyThem = lowerCase.includes('they') || lowerCase.includes('them');
+        if (
+          lowerCase.includes('she') ||
+          lowerCase.includes('her') ||
+          (!heHim && (anyAll || theyThem))
+        ) {
           sheOrHerIds.add(entrant.id);
         }
       }
@@ -172,9 +183,12 @@ async function getEvent(id: number, tournamentName: string, eventName: string) {
     let setsPage = 1;
     let nextSets: ApiSets;
     do {
-      console.log(`event id: ${id}, sets page ${setsPage}, entrantIds: ${entrantIds}`);
+      console.log(`event id: ${id}, sets page ${setsPage}, entrantIds: [${entrantIds}]`);
       nextSets = (await fetchGql(EVENT_SETS_QUERY, { id, page: setsPage, entrantIds })).event.sets;
       for (const set of nextSets.nodes) {
+        if (set.displayScore === 'DQ') {
+          continue;
+        }
         const slot0SeedTier = getSeedTier(set.slots[0].entrant.initialSeedNum);
         const slot1SeedTier = getSeedTier(set.slots[1].entrant.initialSeedNum);
         if (slot0SeedTier === slot1SeedTier) {
@@ -184,12 +198,13 @@ async function getEvent(id: number, tournamentName: string, eventName: string) {
         const slot0Less = set.slots[0].entrant.initialSeedNum < set.slots[1].entrant.initialSeedNum;
         const lowerSeedI = slot0Less ? 1 : 0;
         const lowerSeedId = set.slots[lowerSeedI].entrant.id;
-        if (lowerSeedId === set.winnerId && idToEntrant.has(lowerSeedId) && set.displayScore !== 'DQ') {
+        if (lowerSeedId === set.winnerId && sheOrHerIds.has(lowerSeedId)) {
           const lowerSeed = set.slots[lowerSeedI].entrant.initialSeedNum;
           const higherSeed = set.slots[slot0Less ? 0 : 1].entrant.initialSeedNum;
           const entrant = idToEntrant.get(lowerSeedId)!
           const opponent = idToEntrant.get(set.slots[slot0Less ? 0 : 1].entrant.id)!;
           console.log(`${entrant.name} (${entrant.pronouns}), ${lowerSeed} seed upset ${opponent.name} (${opponent.pronouns}), ${higherSeed} seed (factor: ${getSeedTier(lowerSeed) - getSeedTier(higherSeed)}) at ${tournamentName} - ${eventName}`);
+          await fh.write(`${entrant.name},${entrant.pronouns},${lowerSeed},${opponent.name},${opponent.pronouns},${higherSeed},${getSeedTier(lowerSeed) - getSeedTier(higherSeed)},${tournamentName},${eventName},${startAt * 1000}\n`);
         }
       }
       setsPage++;
@@ -230,6 +245,8 @@ type ApiTournaments = {
   }[],
 };
 async function getTournaments() {
+  await mkdir('csv', { recursive: true });
+  const fh = await open(`csv/${Date.now()}.csv`, 'w+');
   let tournamentPage = 1;
   let nextTournaments: ApiTournaments;
   do {
@@ -237,11 +254,16 @@ async function getTournaments() {
     nextTournaments = (await fetchGql(TOURNAMENTS_QUERY, { page: tournamentPage })).tournaments;
     for (const tournament of nextTournaments.nodes) {
       for (const event of tournament.events) {
-        await getEvent(event.id, tournament.name, event.name);
+        await getEvent(event.id, tournament.name, event.name, tournament.startAt, fh);
       }
     }
     tournamentPage++;
   } while (tournamentPage <= nextTournaments.pageInfo.totalPages);
 }
 
-getTournaments();
+if (key) {
+  console.log(key);
+  getTournaments();
+} else {
+  console.log('Set STARTGG_API_KEY="asdf" in .env');
+}
