@@ -20,6 +20,27 @@ async function wrappedFetch(
   return response;
 }
 
+async function retryFetch(url: string, timeoutMs?: number) {
+  if (timeoutMs) {
+    await new Promise<void>((resolve) => {
+      setTimeout(() => {
+        console.log(`Retrying after ${timeoutMs / 1000} seconds.`);
+        resolve();
+      }, timeoutMs);
+    })
+  }
+
+  try {
+    const response = await wrappedFetch(url);
+    const json = await response.json();
+    return json.entities;
+  } catch (e: any) {
+    if (e === 501 || e === 502 || e === 503 || e === 504) {
+      return retryFetch(url, timeoutMs ? timeoutMs * 2 : 1000);
+    }
+  }
+}
+
 async function fetchGql(query: string, variables: any, timeoutMs?: number) {
   if (timeoutMs) {
     await new Promise<void>((resolve) => {
@@ -53,86 +74,6 @@ async function fetchGql(query: string, variables: any, timeoutMs?: number) {
   }
 }
 
-// 1007910
-const EVENT_ENTRANTS_QUERY = `
-  query EventEntrantsQuery($id: ID, $page: Int) {
-    event(id: $id) {
-      entrants(query: {page: $page, perPage: 332}) {
-        pageInfo {
-          totalPages
-        }
-        nodes {
-          id
-          participants {
-            player {
-              gamerTag
-              user {
-                genderPronoun
-              }
-            }
-          }
-        }
-      }
-    }
-  }
-`;
-type ApiEntrants = {
-  pageInfo: {
-    totalPages: number;
-  },
-  nodes: {
-    id: number,
-    participants: {
-      player: {
-        gamerTag: string;
-        user: {
-          genderPronoun: string | null;
-        } | null,
-      },
-    }[],
-  }[],
-};
-type Entrant = {
-  id: number;
-  name: string;
-  pronouns: string;
-};
-const EVENT_SETS_QUERY = `
-  query EventSetsQuery($id: ID, $page: Int, $entrantIds: [ID]) {
-    event(id: $id) {
-      sets(page: $page, perPage: 142, filters: {entrantIds: $entrantIds, state: 3}) {
-        pageInfo {
-          totalPages
-        }
-        nodes {
-          displayScore
-          slots {
-            entrant {
-              id
-              initialSeedNum
-            }
-          }
-          winnerId
-        }
-      }
-    }
-  }
-`;
-type ApiSets = {
-  pageInfo: {
-    totalPages: number;
-  }
-  nodes: {
-    displayScore: string;
-    slots: {
-      entrant: {
-        id: number;
-        initialSeedNum: number;
-      } | null,
-    }[],
-    winnerId: number;
-  }[],
-};
 const SEED_FLOORS = [1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193, 257, 385, 513, 769, 1025, 1537, 2049, 3073];
 function getSeedTier(seed: number) {
   for (let i = 0; i < SEED_FLOORS.length; i++) {
@@ -142,82 +83,183 @@ function getSeedTier(seed: number) {
       return i - 1;
     }
   }
-  throw 'asdf';
+  return null;
 }
-async function getEvent(id: number, tournamentName: string, eventName: string, startAt: number, fh: FileHandle) {
-  const idToEntrant = new Map<number, Entrant>();
-  const sheOrHerIds = new Set<number>();
-  let entrantsPage = 1;
-  let nextEntrants: ApiEntrants;
-  do {
-    console.log(`event id: ${id}, entrants page ${entrantsPage}`)
-    nextEntrants = (await fetchGql(EVENT_ENTRANTS_QUERY, { id, page: entrantsPage })).event.entrants;
-    for (const entrant of nextEntrants.nodes) {
-      if (!entrant.participants?.[0]) {
-        continue;
-      }
-      const genderPronoun = entrant.participants[0].player.user?.genderPronoun;
-      idToEntrant.set(
-        entrant.id,
-        {
-          id: entrant.id,
-          name: entrant.participants[0].player.gamerTag,
-          pronouns: genderPronoun ?? '',
-        },
-      );
-      if (genderPronoun) {
-        const lowerCase = genderPronoun.toLowerCase();
-        const heHim = lowerCase.includes('he') || lowerCase.includes('him');
-        if (lowerCase.includes('she') || lowerCase.includes('her') || !heHim) {
-          sheOrHerIds.add(entrant.id);
+type Tournament = {
+  slug: string;
+  name: string;
+  startAt: number;
+};
+type Entrant = {
+  id: number;
+  name: string;
+  pronouns: string;
+  seedNum: number;
+  slug: string;
+};
+const TOURNAMENT_PARTICIPANTS_QUERY = `
+  query TournamentParticipantsQuery($slug: String, $eventIds: [ID], $page: Int) {
+    tournament(slug: $slug) {
+      participants(query: {page: $page, perPage: 499, filter: {eventIds: $eventIds}}) {
+        pageInfo {
+          totalPages
+        }
+        nodes {
+          player {
+            id
+            user {
+              genderPronoun
+              slug
+            }
+          }
         }
       }
     }
-    entrantsPage++;
-  } while (entrantsPage <= nextEntrants.pageInfo.totalPages);
-  if (sheOrHerIds.size > 0) {
-    const entrantIds = Array.from(sheOrHerIds.keys());
-    let setsPage = 1;
-    let nextSets: ApiSets;
-    do {
-      console.log(`event id: ${id}, sets page ${setsPage}, entrantIds: [${entrantIds}]`);
-      nextSets = (await fetchGql(EVENT_SETS_QUERY, { id, page: setsPage, entrantIds })).event.sets;
-      for (const set of nextSets.nodes) {
-        if (set.displayScore === 'DQ' || !set.slots[0].entrant || !set.slots[1].entrant) {
-          continue;
-        }
-        const slot0SeedTier = getSeedTier(set.slots[0].entrant.initialSeedNum);
-        const slot1SeedTier = getSeedTier(set.slots[1].entrant.initialSeedNum);
-        if (slot0SeedTier === slot1SeedTier) {
-          continue;
-        }
+  }
+`;
+type ApiParticipants = {
+  pageInfo: {
+    totalPages: number;
+  },
+  nodes: {
+    player: {
+      id: number;
+      user: {
+        genderPronoun: string | null;
+        slug: string | null;
+      } | null,
+    } | null,
+  }[],
+}
+type User = {
+  genderPronoun: string;
+  slug: string;
+};
+async function getEvent(event: { id: number, name: string }, tournament: Tournament, playerIdToUser: Map<number, User>, fh: FileHandle) {
+  console.log(`eventId: ${event.id}`);
+  const eventEntities = await retryFetch(`https://api.smash.gg/event/${event.id}?expand[]=groups`);
+  if (!Array.isArray(eventEntities.groups)) {
+    return;
+  }
+  if (eventEntities.groups.every((group: any) => group.groupTypeId === 3)) {
+    console.log('all groups RR');
+    return;
+  }
 
-        const slot0Less = set.slots[0].entrant.initialSeedNum < set.slots[1].entrant.initialSeedNum;
-        const lowerSeedI = slot0Less ? 1 : 0;
-        const lowerSeedId = set.slots[lowerSeedI].entrant!.id;
-        if (lowerSeedId === set.winnerId && sheOrHerIds.has(lowerSeedId)) {
-          const lowerSeed = set.slots[lowerSeedI].entrant!.initialSeedNum;
-          const higherSeed = set.slots[slot0Less ? 0 : 1].entrant!.initialSeedNum;
-          const entrant = idToEntrant.get(lowerSeedId)!
-          const opponent = idToEntrant.get(set.slots[slot0Less ? 0 : 1].entrant!.id) || { id: 0, name: '', pronouns: '' };
-          console.log(`${entrant.name} (${entrant.pronouns}), ${lowerSeed} seed upset ${opponent.name} (${opponent.pronouns}), ${higherSeed} seed (factor: ${getSeedTier(lowerSeed) - getSeedTier(higherSeed)}) at ${tournamentName} - ${eventName}`);
-          await fh.write(`"${entrant.name}","${entrant.pronouns}",${lowerSeed},"${opponent.name}","${opponent.pronouns}",${higherSeed},${getSeedTier(lowerSeed) - getSeedTier(higherSeed)},"${tournamentName}","${eventName}",${startAt * 1000}\n`);
+  const entrantIdToEntrant = new Map<number, Entrant>();
+  const participantIdToEntrantIdAndPlayerId = new Map<number, { entrantId: number, playerId: number}>();
+  const sets: any[] = [];
+  const groupsSeedsPromises: Promise<any>[] = [];
+  const processGroup = async (group: any) => {
+    console.log(`groupId: ${group.id}`);
+    const groupEntities = await retryFetch(`https://api.smash.gg/phase_group/${group.id}?expand[]=sets&expand[]=seeds`);
+    if (!Array.isArray(groupEntities.seeds) || groupEntities.seeds.length === 0) {
+      return null;
+    }
+    if (Array.isArray(groupEntities.sets)) {
+      sets.push(...groupEntities.sets);
+    }
+    return groupEntities.seeds;
+  };
+  for (const group of eventEntities.groups) {
+    groupsSeedsPromises.push(processGroup(group))
+  }
+  const groupsSeeds = (await Promise.all(groupsSeedsPromises)).filter((group: any) => group !== null);
+  for (const groupSeeds of groupsSeeds) {
+    for (const seed of groupSeeds) {
+      const { entrantId, seedNum } = seed;
+      if (entrantIdToEntrant.has(entrantId)) {
+        continue;
+      }
+
+      const participant = Object.values(seed.mutations.participants)[0] as any;
+      const player = Object.values(seed.mutations.players)[0] as any;
+      if (participant) {
+        if (player) {
+          const user = playerIdToUser.get(player.id);
+          if (user) {
+            entrantIdToEntrant.set(entrantId, { id: entrantId, name: participant.gamerTag, pronouns: user.genderPronoun, seedNum, slug: user.slug });
+          } else {
+            entrantIdToEntrant.set(entrantId, { id: entrantId, name: participant.gamerTag, pronouns: '', seedNum, slug: '' });
+            participantIdToEntrantIdAndPlayerId.set(participant.id, { entrantId, playerId: player.id });
+          }
+        } else {
+          entrantIdToEntrant.set(entrantId, { id: entrantId, name: participant.gamerTag, pronouns: '', seedNum, slug: '' });
         }
       }
-      setsPage++;
-    } while (setsPage <= nextSets.pageInfo.totalPages);
+    }
+  }
+
+  if (participantIdToEntrantIdAndPlayerId.size > 0) {
+    let participantsPage = 1;
+    let nextParticipants: ApiParticipants;
+    do {
+      console.log(`participants: slug: ${tournament.slug}, eventIds: [${event.id}], page: ${participantsPage}`);
+      nextParticipants = (await fetchGql(TOURNAMENT_PARTICIPANTS_QUERY, { slug: tournament.slug, eventIds: [event.id], page: participantsPage })).tournament.participants;
+      for (const participant of nextParticipants.nodes) {
+        const { player } = participant;
+        if (!player) {
+          continue;
+        }
+        const genderPronoun = player.user?.genderPronoun || '';
+        const slug = player.user?.slug?.slice(5) || '';
+        playerIdToUser.set(player.id, { genderPronoun, slug });
+      }
+      participantsPage++
+    } while (participantsPage <= nextParticipants.pageInfo.totalPages);
+    for (const entrantIdAndPlayerId of participantIdToEntrantIdAndPlayerId.values()) {
+      const entrant = entrantIdToEntrant.get(entrantIdAndPlayerId.entrantId)!;
+      const { id, name, seedNum } = entrant;
+      const user = playerIdToUser.get(entrantIdAndPlayerId.playerId)!;
+      entrantIdToEntrant.set(id, { id, name, pronouns: user.genderPronoun, seedNum, slug: user.slug });
+    }
+  }
+
+  const sheOrHerIds = new Set<number>();
+  for (const entrant of entrantIdToEntrant.values()) {
+    if (entrant.pronouns) {
+      const lowerCase = entrant.pronouns.toLowerCase();
+      const heHim = lowerCase.includes('he') || lowerCase.includes('him');
+      if (lowerCase.includes('she') || lowerCase.includes('her') || !heHim) {
+        sheOrHerIds.add(entrant.id);
+      }
+    }
+  }
+
+  for (const set of sets) {
+    const { entrant1Id, entrant2Id, entrant1Score, entrant2Score, winnerId } = set;
+    if (!entrant1Id || !entrant2Id || !winnerId || entrant1Score === -1 || entrant2Score === -1) {
+      continue;
+    }
+
+    const entrant1 = entrantIdToEntrant.get(entrant1Id)!;
+    const entrant2 = entrantIdToEntrant.get(entrant2Id)!;
+    const entrant1SeedTier = getSeedTier(entrant1.seedNum);
+    const entrant2SeedTier = getSeedTier(entrant2.seedNum);
+    if (entrant1SeedTier === null || entrant2SeedTier === null || entrant1SeedTier === entrant2SeedTier) {
+      continue;
+    }
+
+    const lowerEntrant = entrant1SeedTier < entrant2SeedTier ? entrant2 : entrant1;
+    if (winnerId === lowerEntrant.id && sheOrHerIds.has(lowerEntrant.id)) {
+      const factor = Math.abs(entrant1SeedTier - entrant2SeedTier);
+      const opponent = entrant1SeedTier < entrant2SeedTier ? entrant1 : entrant2;
+      console.log(`${lowerEntrant.name} (${lowerEntrant.pronouns}), ${lowerEntrant.seedNum} seed upset ${opponent.name} (${opponent.pronouns}), ${opponent.seedNum} seed (factor: ${factor}) at ${tournament.name} - ${event.name}`);
+      await fh.write(`"${lowerEntrant.slug}","${lowerEntrant.name}","${lowerEntrant.pronouns}",${lowerEntrant.seedNum},"${opponent.slug}","${opponent.name}","${opponent.pronouns}",${opponent.seedNum},${factor},"${tournament.name}","${event.name}",${tournament.startAt * 1000}\n`);
+    }
   }
 }
 
 const TOURNAMENTS_QUERY = `
-  query TournamentsQuery($page: Int) {
+  query TournamentsQuery($page: Int, $afterDate: Timestamp) {
     tournaments(
-      query: {page: $page, perPage: 500, filter: {past: true, videogameIds: [1]}}
+      query: {page: $page, perPage: 500, filter: {afterDate: $afterDate, past: true, videogameIds: [1]}, sortBy: "startAt ASC"}
     ) {
       pageInfo {
         totalPages
       }
       nodes {
+        slug
         name
         startAt
         events(filter: {type: [1], videogameId: [1]}) {
@@ -233,6 +275,7 @@ type ApiTournaments = {
     totalPages: number;
   }
   nodes: {
+    slug: string;
     name: string;
     startAt: number;
     events: {
@@ -244,18 +287,48 @@ type ApiTournaments = {
 async function getTournaments() {
   await mkdir('csv', { recursive: true });
   const fh = await open(`csv/${Date.now()}.csv`, 'w+');
+  const playerIdToUser = new Map<number, User>();
+  let afterDate = 1426345200;
   let tournamentPage = 1;
   let nextTournaments: ApiTournaments;
-  do {
-    console.log(`tournaments page ${tournamentPage}`);
-    nextTournaments = (await fetchGql(TOURNAMENTS_QUERY, { page: tournamentPage })).tournaments;
-    for (const tournament of nextTournaments.nodes) {
-      for (const event of tournament.events) {
-        await getEvent(event.id, tournament.name, event.name, tournament.startAt, fh);
+  const seenSlugs = new Set<string>();
+  while(true) {
+    do {
+      console.log(`tournaments page ${tournamentPage}`);
+      nextTournaments = (await fetchGql(TOURNAMENTS_QUERY, { page: tournamentPage, afterDate })).tournaments;
+      for (const apiTournament of nextTournaments.nodes) {
+        const { slug } = apiTournament;
+        if (seenSlugs.has(slug)) {
+          continue;
+        }
+
+        const tournament: Tournament = { slug, name: apiTournament.name, startAt: apiTournament.startAt };
+        console.log(`tournament slug: ${tournament.slug}, date: ${new Date(apiTournament.startAt * 1000)}`);
+        for (const event of apiTournament.events) {
+          await getEvent(event, tournament, playerIdToUser, fh);
+        }
       }
-    }
-    tournamentPage++;
-  } while (tournamentPage <= nextTournaments.pageInfo.totalPages);
+      if (tournamentPage === 20) {
+        let newLastStartAt = 0;
+        for (let i = nextTournaments.nodes.length - 1; i >= 0; i--) {
+          if (newLastStartAt === 0) {
+            newLastStartAt = nextTournaments.nodes[i].startAt;
+            seenSlugs.add(nextTournaments.nodes[i].slug);
+          } else if (newLastStartAt === nextTournaments.nodes[i].startAt) {
+            seenSlugs.add(nextTournaments.nodes[i].slug);
+          } else {
+            break;
+          }
+        }
+        afterDate = newLastStartAt;
+      }
+      tournamentPage++;
+      if (tournamentPage > nextTournaments.pageInfo.totalPages) {
+        await fh.close();
+        return;
+      }
+    } while (tournamentPage <= 20);
+  }
 }
 
 if (key) {
