@@ -169,7 +169,9 @@ async function getEvent(event: { id: number, name: string }, tournament: Tournam
     for (const seed of groupSeeds) {
       const { entrantId, seedNum } = seed;
       if (entrantIdToEntrant.has(entrantId)) {
-        continue;
+        if (entrantIdToEntrant.get(entrantId)!.seedNum < seedNum) {
+          continue;
+        }
       }
 
       const participant = Object.values(seed.mutations.participants)[0] as any;
