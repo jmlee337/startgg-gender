@@ -162,30 +162,38 @@ async function getEvent(event: { id: number, name: string }, tournament: Tournam
     return groupEntities.seeds;
   };
   for (const group of eventEntities.groups) {
-    groupsSeedsPromises.push(processGroup(group))
+    if (group.state === 2 || group.state === 3) {
+      groupsSeedsPromises.push(processGroup(group));
+    }
   }
   const groupsSeeds = (await Promise.all(groupsSeedsPromises)).filter((group: any) => group !== null);
   for (const groupSeeds of groupsSeeds) {
     for (const seed of groupSeeds) {
-      const { entrantId } = seed;
-      if (entrantIdToEntrant.has(entrantId)) {
+      const { entrantId, seedNum } = seed;
+      if (!entrantId || entrantIdToEntrant.has(entrantId)) {
         continue;
       }
 
-      const { initialSeedNum, participantIds } = seed.mutations.entrants[entrantId];
+      const entrant = seed.mutations.entrants[entrantId];
+      const initialSeedNum = entrant.initialSeedNum;
+      const participantIds = entrant.participantIds;
+      if (!Array.isArray(participantIds) || participantIds.length === 0) {
+        continue;
+      }
+
       const participant = seed.mutations.participants[participantIds[0]];
       const player = seed.mutations.players[participant.playerId];
       if (participant) {
         if (player) {
           const user = playerIdToUser.get(player.id);
           if (user) {
-            entrantIdToEntrant.set(entrantId, { id: entrantId, name: participant.gamerTag, pronouns: user.genderPronoun, seed: initialSeedNum, slug: user.slug });
+            entrantIdToEntrant.set(entrantId, { id: entrantId, name: participant.gamerTag, pronouns: user.genderPronoun, seed: initialSeedNum || seedNum, slug: user.slug });
           } else {
-            entrantIdToEntrant.set(entrantId, { id: entrantId, name: participant.gamerTag, pronouns: '', seed: initialSeedNum, slug: '' });
+            entrantIdToEntrant.set(entrantId, { id: entrantId, name: participant.gamerTag, pronouns: '', seed: initialSeedNum || seedNum, slug: '' });
             participantIdToEntrantIdAndPlayerId.set(participant.id, { entrantId, playerId: player.id });
           }
         } else {
-          entrantIdToEntrant.set(entrantId, { id: entrantId, name: participant.gamerTag, pronouns: '', seed: initialSeedNum, slug: '' });
+          entrantIdToEntrant.set(entrantId, { id: entrantId, name: participant.gamerTag, pronouns: '', seed: initialSeedNum || seedNum, slug: '' });
         }
       }
     }
