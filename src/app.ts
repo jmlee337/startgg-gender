@@ -185,8 +185,8 @@ async function getEvent(event: { id: number, name: string }, tournament: Tournam
       }
 
       const participant = seed.mutations.participants[participantIds[0]];
-      const player = seed.mutations.players[participant.playerId];
       if (participant) {
+        const player = seed.mutations.players[participant.playerId];
         if (player) {
           const user = playerIdToUser.get(player.id);
           if (user) {
