@@ -24,7 +24,7 @@ async function retryFetch(url: string, timeoutMs?: number) {
   if (timeoutMs) {
     await new Promise<void>((resolve) => {
       setTimeout(() => {
-        console.log(`Retrying after ${timeoutMs / 1000} seconds.`);
+        console.log(`Retrying after ${timeoutMs / 1000} seconds: ${url}`);
         resolve();
       }, timeoutMs);
     })
@@ -33,6 +33,9 @@ async function retryFetch(url: string, timeoutMs?: number) {
   try {
     const response = await wrappedFetch(url);
     const json = await response.json();
+    if (!json?.entities) {
+      return retryFetch(url, timeoutMs ? timeoutMs * 2 : 1000);
+    }
     return json.entities;
   } catch (e: any) {
     if (e === 501 || e === 502 || e === 503 || e === 504) {
