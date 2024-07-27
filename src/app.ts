@@ -31,12 +31,11 @@ async function retryFetch(url: string, timeoutMs?: number) {
   }
 
   try {
-    const response = await wrappedFetch(url);
-    const json = await response.json();
-    if (!json?.entities) {
+    const entities = (await ((await wrappedFetch(url)).json()))?.entities;
+    if (!entities) {
       return retryFetch(url, timeoutMs ? timeoutMs * 2 : 1000);
     }
-    return json.entities;
+    return entities;
   } catch (e: any) {
     if (e === 501 || e === 502 || e === 503 || e === 504) {
       return retryFetch(url, timeoutMs ? timeoutMs * 2 : 1000);
