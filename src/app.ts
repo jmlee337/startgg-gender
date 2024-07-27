@@ -94,7 +94,7 @@ type Entrant = {
   id: number;
   name: string;
   pronouns: string;
-  seedNum: number;
+  seed: number;
   slug: string;
 };
 const TOURNAMENT_PARTICIPANTS_QUERY = `
@@ -167,26 +167,25 @@ async function getEvent(event: { id: number, name: string }, tournament: Tournam
   const groupsSeeds = (await Promise.all(groupsSeedsPromises)).filter((group: any) => group !== null);
   for (const groupSeeds of groupsSeeds) {
     for (const seed of groupSeeds) {
-      const { entrantId, seedNum } = seed;
+      const { entrantId } = seed;
       if (entrantIdToEntrant.has(entrantId)) {
-        if (entrantIdToEntrant.get(entrantId)!.seedNum < seedNum) {
-          continue;
-        }
+        continue;
       }
 
-      const participant = Object.values(seed.mutations.participants)[0] as any;
-      const player = Object.values(seed.mutations.players)[0] as any;
+      const { initialSeedNum, participantIds } = seed.mutations.entrants[entrantId];
+      const participant = seed.mutations.participants[participantIds[0]];
+      const player = seed.mutations.players[participant.playerId];
       if (participant) {
         if (player) {
           const user = playerIdToUser.get(player.id);
           if (user) {
-            entrantIdToEntrant.set(entrantId, { id: entrantId, name: participant.gamerTag, pronouns: user.genderPronoun, seedNum, slug: user.slug });
+            entrantIdToEntrant.set(entrantId, { id: entrantId, name: participant.gamerTag, pronouns: user.genderPronoun, seed: initialSeedNum, slug: user.slug });
           } else {
-            entrantIdToEntrant.set(entrantId, { id: entrantId, name: participant.gamerTag, pronouns: '', seedNum, slug: '' });
+            entrantIdToEntrant.set(entrantId, { id: entrantId, name: participant.gamerTag, pronouns: '', seed: initialSeedNum, slug: '' });
             participantIdToEntrantIdAndPlayerId.set(participant.id, { entrantId, playerId: player.id });
           }
         } else {
-          entrantIdToEntrant.set(entrantId, { id: entrantId, name: participant.gamerTag, pronouns: '', seedNum, slug: '' });
+          entrantIdToEntrant.set(entrantId, { id: entrantId, name: participant.gamerTag, pronouns: '', seed: initialSeedNum, slug: '' });
         }
       }
     }
@@ -211,9 +210,13 @@ async function getEvent(event: { id: number, name: string }, tournament: Tournam
     } while (participantsPage <= nextParticipants.pageInfo.totalPages);
     for (const entrantIdAndPlayerId of participantIdToEntrantIdAndPlayerId.values()) {
       const entrant = entrantIdToEntrant.get(entrantIdAndPlayerId.entrantId)!;
-      const { id, name, seedNum } = entrant;
-      const user = playerIdToUser.get(entrantIdAndPlayerId.playerId)!;
-      entrantIdToEntrant.set(id, { id, name, pronouns: user.genderPronoun, seedNum, slug: user.slug });
+      const { id, name, seed } = entrant;
+      const user = playerIdToUser.get(entrantIdAndPlayerId.playerId);
+      if (user) {
+        entrantIdToEntrant.set(id, { id, name, pronouns: user.genderPronoun, seed, slug: user.slug });
+      } else {
+        entrantIdToEntrant.set(id, { id, name, pronouns: '', seed, slug: '' });
+      }
     }
   }
 
@@ -236,8 +239,8 @@ async function getEvent(event: { id: number, name: string }, tournament: Tournam
 
     const entrant1 = entrantIdToEntrant.get(entrant1Id)!;
     const entrant2 = entrantIdToEntrant.get(entrant2Id)!;
-    const entrant1SeedTier = getSeedTier(entrant1.seedNum);
-    const entrant2SeedTier = getSeedTier(entrant2.seedNum);
+    const entrant1SeedTier = getSeedTier(entrant1.seed);
+    const entrant2SeedTier = getSeedTier(entrant2.seed);
     if (entrant1SeedTier === null || entrant2SeedTier === null || entrant1SeedTier === entrant2SeedTier) {
       continue;
     }
@@ -246,8 +249,8 @@ async function getEvent(event: { id: number, name: string }, tournament: Tournam
     if (winnerId === lowerEntrant.id && sheOrHerIds.has(lowerEntrant.id)) {
       const factor = Math.abs(entrant1SeedTier - entrant2SeedTier);
       const opponent = entrant1SeedTier < entrant2SeedTier ? entrant1 : entrant2;
-      console.log(`${lowerEntrant.name} (${lowerEntrant.pronouns}), ${lowerEntrant.seedNum} seed upset ${opponent.name} (${opponent.pronouns}), ${opponent.seedNum} seed (factor: ${factor}) at ${tournament.name} - ${event.name}`);
-      await fh.write(`"${lowerEntrant.slug}","${lowerEntrant.name}","${lowerEntrant.pronouns}",${lowerEntrant.seedNum},"${opponent.slug}","${opponent.name}","${opponent.pronouns}",${opponent.seedNum},${factor},"${tournament.name}","${event.name}",${tournament.startAt * 1000}\n`);
+      console.log(`${lowerEntrant.name} (${lowerEntrant.pronouns}), ${lowerEntrant.seed} seed upset ${opponent.name} (${opponent.pronouns}), ${opponent.seed} seed (factor: ${factor}) at ${tournament.name} - ${event.name}`);
+      await fh.write(`"${lowerEntrant.slug}","${lowerEntrant.name}","${lowerEntrant.pronouns}",${lowerEntrant.seed},"${opponent.slug}","${opponent.name}","${opponent.pronouns}",${opponent.seed},${factor},"${tournament.name}","${event.name}",${tournament.startAt * 1000}\n`);
     }
   }
 }
@@ -291,10 +294,10 @@ async function getTournaments() {
   const fh = await open(`csv/${Date.now()}.csv`, 'w+');
   const playerIdToUser = new Map<number, User>();
   let afterDate = 1426345200;
-  let tournamentPage = 1;
   let nextTournaments: ApiTournaments;
   const seenSlugs = new Set<string>();
   while(true) {
+    let tournamentPage = 1;
     do {
       console.log(`tournaments page ${tournamentPage}`);
       nextTournaments = (await fetchGql(TOURNAMENTS_QUERY, { page: tournamentPage, afterDate })).tournaments;
@@ -323,6 +326,7 @@ async function getTournaments() {
           }
         }
         afterDate = newLastStartAt;
+        console.log(`new afterDate: ${afterDate}`);
       }
       tournamentPage++;
       if (tournamentPage > nextTournaments.pageInfo.totalPages) {
