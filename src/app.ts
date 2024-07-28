@@ -38,9 +38,8 @@ async function retryFetch(url: string, timeoutMs?: number) {
     }
     return retryFetch(url, timeoutMs ? timeoutMs * 2 : 1000);
   } catch (e: any) {
-    if (e === 501 || e === 502 || e === 503 || e === 504) {
-      return retryFetch(url, timeoutMs ? timeoutMs * 2 : 1000);
-    }
+    console.log(`error ${e}`);
+    return retryFetch(url, timeoutMs ? timeoutMs * 2 : 1000);
   }
 }
 
@@ -71,9 +70,8 @@ async function fetchGql(query: string, variables: any, timeoutMs?: number) {
     }
     return json.data;
   } catch (e: any) {
-    if (e === 501 || e === 502 || e === 503 || e === 504) {
-      return fetchGql(query, variables, timeoutMs ? timeoutMs * 2 : 1000);
-    }
+    console.log(`error ${e}`);
+    return fetchGql(query, variables, timeoutMs ? timeoutMs * 2 : 1000);
   }
 }
 
