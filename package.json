@@ -1,6 +1,6 @@
 {
   "name": "startgg-gender",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "description": "startgg melee singles gender",
   "main": "dist/src/index.js",
   "author": "Nicolet",
